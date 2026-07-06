@@ -1,10 +1,8 @@
 const router = require('express').Router();
-const path = require('path');
 const pool = require('../config/database');
 const auth = require('../middleware/auth');
 const { checkPermission } = require('../middleware/permissions');
 const { log } = require('../middleware/logger');
-const upload = require('../config/multer');
 
 // GET /api/produtos
 router.get('/', auth, checkPermission('produtos', 'pode_ver'), async (req, res) => {
@@ -46,18 +44,18 @@ router.get('/:id', auth, checkPermission('produtos', 'pode_ver'), async (req, re
 
 // POST /api/produtos
 router.post('/', auth, checkPermission('produtos', 'pode_criar'), async (req, res) => {
-  const { descricao, preco_custo, preco_venda, qtde_minima_estoque } = req.body;
+  const { descricao, preco_custo, preco_venda, qtde_minima_estoque, foto_base64 } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO produtos (descricao, preco_custo, preco_venda, qtde_minima_estoque)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [descricao, preco_custo || 0, preco_venda || 0, qtde_minima_estoque || 0]
+      `INSERT INTO produtos (descricao, preco_custo, preco_venda, qtde_minima_estoque, foto_url)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [descricao, preco_custo || 0, preco_venda || 0, qtde_minima_estoque || 0, foto_base64 || null]
     );
     await log({
       usuario_id: req.usuario.id, acao: 'CADASTRO_PRODUTO',
       tabela: 'produtos', registro_id: rows[0].id,
       descricao: `Produto criado: ${descricao}`,
-      dados_depois: rows[0], ip: req.ip
+      dados_depois: { descricao, preco_custo, preco_venda }, ip: req.ip
     });
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -68,7 +66,7 @@ router.post('/', auth, checkPermission('produtos', 'pode_criar'), async (req, re
 // PUT /api/produtos/:id
 router.put('/:id', auth, checkPermission('produtos', 'pode_editar'), async (req, res) => {
   const { id } = req.params;
-  const { descricao, preco_custo, preco_venda, qtde_minima_estoque, ativo } = req.body;
+  const { descricao, preco_custo, preco_venda, qtde_minima_estoque, ativo, foto_base64 } = req.body;
 
   const client = await pool.connect();
   try {
@@ -101,6 +99,8 @@ router.put('/:id', auth, checkPermission('produtos', 'pode_editar'), async (req,
         dados_antes: { preco_venda: antes.preco_venda }, dados_depois: { preco_venda }, ip: req.ip });
     }
 
+    const fotoFinal = foto_base64 !== undefined ? foto_base64 : antes.foto_url;
+
     const { rows } = await client.query(
       `UPDATE produtos SET
         descricao = COALESCE($1, descricao),
@@ -108,9 +108,10 @@ router.put('/:id', auth, checkPermission('produtos', 'pode_editar'), async (req,
         preco_venda = COALESCE($3, preco_venda),
         qtde_minima_estoque = COALESCE($4, qtde_minima_estoque),
         ativo = COALESCE($5, ativo),
+        foto_url = $6,
         updated_at = NOW()
-       WHERE id = $6 RETURNING *`,
-      [descricao, preco_custo, preco_venda, qtde_minima_estoque, ativo, id]
+       WHERE id = $7 RETURNING *`,
+      [descricao, preco_custo, preco_venda, qtde_minima_estoque, ativo, fotoFinal, id]
     );
 
     await client.query('COMMIT');
@@ -159,18 +160,6 @@ router.get('/:id/historico-precos', auth, checkPermission('produtos', 'pode_ver'
     query += ' ORDER BY hp.alterado_em DESC';
     const { rows } = await pool.query(query, params);
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/produtos/:id/foto
-router.post('/:id/foto', auth, checkPermission('produtos', 'pode_editar'), upload.single('foto'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'Nenhuma foto enviada' });
-    const fotoUrl = `/uploads/${req.file.filename}`;
-    await pool.query('UPDATE produtos SET foto_url = $1, updated_at = NOW() WHERE id = $2', [fotoUrl, req.params.id]);
-    res.json({ foto_url: fotoUrl });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

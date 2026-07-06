@@ -19,7 +19,8 @@ export default function Produtos() {
   const [produtoAtual, setProdutoAtual] = useState<any>(null);
   const [historico, setHistorico] = useState<any[]>([]);
   const [form, setForm] = useState({ descricao: '', preco_custo: '0', preco_venda: '0', qtde_minima_estoque: '0' });
-  const [fotoFile, setFotoFile] = useState<File | null>(null);
+  const [fotoBase64, setFotoBase64] = useState<string>('');
+  const [previewFoto, setPreviewFoto] = useState<string>('');
   const [erro, setErro] = useState('');
   const [salvando, setSalvando] = useState(false);
 
@@ -36,13 +37,30 @@ export default function Produtos() {
   const abrirNovo = () => {
     setProdutoAtual(null);
     setForm({ descricao: '', preco_custo: '0', preco_venda: '0', qtde_minima_estoque: '0' });
-    setFotoFile(null); setErro(''); setModal('form');
+    setFotoBase64(''); setPreviewFoto(''); setErro(''); setModal('form');
   };
 
   const abrirEditar = (p: any) => {
     setProdutoAtual(p);
     setForm({ descricao: p.descricao, preco_custo: p.preco_custo, preco_venda: p.preco_venda, qtde_minima_estoque: p.qtde_minima_estoque });
-    setFotoFile(null); setErro(''); setModal('form');
+    setFotoBase64(''); setPreviewFoto(p.foto_url || ''); setErro(''); setModal('form');
+  };
+
+  const handleFotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      alert('A foto deve ter no máximo 500KB. Reduza o tamanho da imagem antes de enviar.');
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      setFotoBase64(base64);
+      setPreviewFoto(base64);
+    };
+    reader.readAsDataURL(file);
   };
 
   const abrirHistorico = async (p: any) => {
@@ -56,18 +74,13 @@ export default function Produtos() {
     e.preventDefault();
     setSalvando(true); setErro('');
     try {
-      let produto: any;
+      const payload: any = { ...form };
+      if (fotoBase64) payload.foto_base64 = fotoBase64;
+
       if (produtoAtual) {
-        const { data } = await api.put(`/produtos/${produtoAtual.id}`, form);
-        produto = data;
+        await api.put(`/produtos/${produtoAtual.id}`, payload);
       } else {
-        const { data } = await api.post('/produtos', form);
-        produto = data;
-      }
-      if (fotoFile) {
-        const fd = new FormData();
-        fd.append('foto', fotoFile);
-        await api.post(`/produtos/${produto.id}/foto`, fd);
+        await api.post('/produtos', payload);
       }
       setModal(null); carregar();
     } catch (err: any) {
@@ -191,15 +204,17 @@ export default function Produtos() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Foto (JPG/PNG, até 5MB)</Label>
-              <input type="file" accept=".jpg,.jpeg,.png" onChange={e => setFotoFile(e.target.files?.[0] || null)} className="text-sm" />
-              {(fotoFile || produtoAtual?.foto_url) && (
-                <img
-                  src={fotoFile ? URL.createObjectURL(fotoFile) : produtoAtual.foto_url}
-                  alt="preview"
-                  className="w-24 h-24 object-cover rounded-lg border"
-                />
+              <Label>Foto do Produto</Label>
+              {(previewFoto) && (
+                <img src={previewFoto} alt="Preview" className="w-24 h-24 object-cover rounded-lg border" />
               )}
+              <Input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleFotoChange}
+                className="cursor-pointer"
+              />
+              <p className="text-xs text-muted-foreground">JPG, PNG ou WebP — máximo 500KB</p>
             </div>
             {erro && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-md">{erro}</div>}
             <DialogFooter>
